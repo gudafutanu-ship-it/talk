@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高さ計算機</title>
+
+    <!-- PWA & アイコン設定 -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="高さ計算">
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 15px;
+        }
+        .container {
+            background: #ffffff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 360px;
+        }
+        h1 {
+            font-size: 1.2rem;
+            margin-bottom: 8px;
+            text-align: center;
+            color: #2c3e50;
+        }
+        .mic-panel {
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .btn-mic {
+            background-color: #2ecc71;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        .btn-mic.listening {
+            background-color: #e74c3c;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+        .form-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .form-row label {
+            width: 50px;
+            font-weight: bold;
+            font-size: 0.95rem;
+            color: #34495e;
+        }
+        .form-row input {
+            flex: 1;
+            padding: 8px 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 1.05rem;
+        }
+        .form-row input:read-only {
+            background-color: #e9ecef;
+            color: #2c3e50;
+            font-weight: bold;
+        }
+        .result-row input {
+            background-color: #e8f4f8;
+            border-color: #3498db;
+            color: #2980b9;
+            font-weight: bold;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .btn-calc {
+            background-color: #3498db;
+            color: #fff;
+        }
+        .btn-reset {
+            background-color: #95a5a6;
+            color: #fff;
+        }
+        .status {
+            font-size: 0.75rem;
+            text-align: center;
+            color: #e67e22;
+            min-height: 1.2em;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>高さ計算機</h1>
+
+    <!-- 音声入力ボタン -->
+    <div class="mic-panel">
+        <button id="micBtn" class="btn-mic" onclick="toggleSpeech()">🎤 音声入力をON</button>
+    </div>
+
+    <div class="form-row">
+        <label for="base">平面</label>
+        <input type="number" id="base" step="any" placeholder="例: 1000">
+    </div>
+
+    <div class="form-row">
+        <label for="hypotenuse">斜面</label>
+        <input type="number" id="hypotenuse" step="any" placeholder="例: 1064">
+    </div>
+
+    <div class="form-row">
+        <label for="angle">角度</label>
+        <input type="number" id="angle" step="any" min="0.0001" max="89.9999" placeholder="度 (°)">
+    </div>
+
+    <div class="btn-group">
+        <button class="btn-calc" onclick="calculate()">計算</button>
+        <button class="btn-reset" onclick="resetForm()">リセット</button>
+    </div>
+
+    <div class="form-row result-row">
+        <label for="height">高さ</label>
+        <input type="number" id="height" readonly placeholder="計算結果">
+    </div>
+
+    <div class="status" id="statusMessage">「平面 1000」や「角度 20」と話しかけてください</div>
+</div>
+
+<script>
+    const inputs = {
+        base: document.getElementById('base'),
+        hypotenuse: document.getElementById('hypotenuse'),
+        angle: document.getElementById('angle'),
+        height: document.getElementById('height')
+    };
+    const statusMsg = document.getElementById('statusMessage');
+    const micBtn = document.getElementById('micBtn');
+
+    // Web Speech API（音声認識）
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let isListening = false;
+
+    if (SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.lang = 'ja-JP';
+        recognition.interimResults = false;
+        recognition.continuous = true;
+
+        recognition.onresult = (event) => {
+            const lastResultIndex = event.results.length - 1;
+            const text = event.results[lastResultIndex][0].transcript.trim();
+            parseSpeech(text);
+        };
+
+        recognition.onerror = (event) => {
+            statusMsg.textContent = "音声認識エラー: " + event.error;
+        };
+
+        recognition.onend = () => {
+            if (isListening) {
+                recognition.start();
+            }
+        };
+    } else {
+        micBtn.style.display = 'none';
+        statusMsg.textContent = "お使いのブラウザは音声入力に対応していません";
+    }
+
+    function toggleSpeech() {
+        if (!recognition) return;
+
+        if (isListening) {
+            isListening = false;
+            recognition.stop();
+            micBtn.classList.remove('listening');
+            micBtn.textContent = '🎤 音声入力をON';
+            statusMsg.textContent = "音声入力を停止しました";
+            statusMsg.style.color = "#666";
+        } else {
+            isListening = true;
+            recognition.start();
+            micBtn.classList.add('listening');
+            micBtn.textContent = '🔴 聞き取り中...';
+            statusMsg.textContent = "「平面 1000」のように話してください";
+            statusMsg.style.color = "#27ae60";
+
+            // iPhone対策：マイク開始時に一瞬ダミーの音声を再生して音声合成を有効化
+            speakText("");
+        }
+    }
+
+    function parseSpeech(text) {
+        let convertedText = text.replace(/一/g, '1').replace(/二/g, '2').replace(/三/g, '3')
+                                .replace(/四/g, '4').replace(/五/g, '5').replace(/六/g, '6')
+                                .replace(/七/g, '7').replace(/八/g, '8').replace(/九/g, '9')
+                                .replace(/零|ゼロ/g, '0');
+
+        const numberMatch = convertedText.match(/\d+(\.\d+)?/);
+
+        let targetKey = null;
+
+        if (text.includes('平面') || text.includes('へいめん') || text.includes('底辺')) {
+            targetKey = 'base';
+        } else if (text.includes('斜面') || text.includes('しゃめん') || text.includes('斜辺')) {
+            targetKey = 'hypotenuse';
+        } else if (text.includes('角度') || text.includes('かくど') || text.includes('度')) {
+            targetKey = 'angle';
+        } else if (text.includes('計算') || text.includes('けいさん')) {
+            calculate();
+            return;
+        } else if (text.includes('リセット')) {
+            resetForm();
+            return;
+        }
+
+        if (targetKey && numberMatch) {
+            const numValue = parseFloat(numberMatch[0]);
+            inputs[targetKey].value = numValue;
+            statusMsg.textContent = `入力完了: ${inputs[targetKey].previousElementSibling.textContent} ＝ ${numValue}`;
+            statusMsg.style.color = "#27ae60";
+            
+            // 入力確認を声で返す
+            speakText(`${inputs[targetKey].previousElementSibling.textContent} ${numValue}`);
+        } else if (!targetKey && numberMatch) {
+            statusMsg.textContent = `認識: "${text}"（項目名も発声してください）`;
+            statusMsg.style.color = "#e67e22";
+        }
+    }
+
+    function calculate() {
+        const inputKeys = ['base', 'hypotenuse', 'angle'];
+        const filledKeys = inputKeys.filter(key => inputs[key].value !== '' && !isNaN(parseFloat(inputs[key].value)));
+
+        if (filledKeys.length !== 2) {
+            const msg = "2項目を入力してください";
+            alert(msg);
+            speakText(msg);
+            return;
+        }
+
+        let b = parseFloat(inputs.base.value);
+        let s = parseFloat(inputs.hypotenuse.value);
+        let a = parseFloat(inputs.angle.value);
+        let h = 0;
+
+        const rad = deg => deg * (Math.PI / 180);
+        const deg = rad => rad * (180 / Math.PI);
+
+        if (filledKeys.includes('base') && filledKeys.includes('hypotenuse')) {
+            if (s <= b) { alert("斜面は平面より大きい値を指定してください"); return; }
+            h = Math.sqrt(s * s - b * b);
+            a = deg(Math.acos(b / s));
+        } else if (filledKeys.includes('base') && filledKeys.includes('angle')) {
+            if (a <= 0 || a >= 90) { alert("角度は0度より大きく90度未満で指定してください"); return; }
+            h = b * Math.tan(rad(a));
+            s = b / Math.cos(rad(a));
+        } else if (filledKeys.includes('hypotenuse') && filledKeys.includes('angle')) {
+            if (a <= 0 || a >= 90) { alert("角度は0度より大きく90度未満で指定してください"); return; }
+            b = s * Math.cos(rad(a));
+            h = s * Math.sin(rad(a));
+        }
+
+        const calculatedH = round(h);
+        inputs.base.value = round(b);
+        inputs.hypotenuse.value = round(s);
+        inputs.angle.value = round(a);
+        inputs.height.value = calculatedH;
+
+        inputKeys.forEach(key => {
+            if (!filledKeys.includes(key)) {
+                inputs[key].readOnly = true;
+            }
+        });
+
+        statusMsg.textContent = "計算完了";
+        statusMsg.style.color = "#27ae60";
+
+        // ★ 音声読み上げ（「高さは ○○ です」）
+        speakText(`高さは ${calculatedH} です`);
+    }
+
+    // 音声読み上げ処理
+    function speakText(text) {
+        if ('speechSynthesis' in window && text !== "") {
+            speechSynthesis.cancel(); // 前の音声を停止
+            const uttr = new SpeechSynthesisUtterance(text);
+            uttr.lang = 'ja-JP';
+            uttr.rate = 1.0; // 読み上げ速度
+            speechSynthesis.speak(uttr);
+        }
+    }
+
+    function round(val) {
+        return Math.round(val * 100) / 100;
+    }
+
+    function resetForm() {
+        ['base', 'hypotenuse', 'angle', 'height'].forEach(key => {
+            inputs[key].value = '';
+            inputs[key].readOnly = false;
+        });
+        statusMsg.textContent = "「平面 1000」や「角度 20」と話しかけてください";
+        statusMsg.style.color = "#e67e22";
+        speakText("リセットしました");
+    }
+</script>
+
+</body>
+</html>
