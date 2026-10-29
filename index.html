@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>ここはどこ？（ダークモード版）</title>
+  <title>ここはどこ？（デバッグ版）</title>
   <style>
     * {
       box-sizing: border-box;
@@ -14,14 +14,12 @@
       padding: 0;
       width: 100%;
       height: 100%;
-      background-color: #000000; /* 完全に真っ黒（省電力・OLED画面保護） */
+      background-color: #000000;
       color: #ffffff;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
       overflow: hidden;
       touch-action: manipulation;
     }
-
-    /* 画面全体をタッチ受付エリアにする */
     #screen {
       width: 100%;
       height: 100%;
@@ -29,47 +27,42 @@
       flex-direction: column;
       justify-content: center;
       align-items: center;
-      padding: 30px;
+      padding: 20px;
       text-align: center;
       cursor: pointer;
     }
-
-    /* 普段は非表示（真っ黒）にし、タップ時にフワッと現れるUIコンテナ */
     #uiContainer {
       opacity: 0;
       visibility: hidden;
       transition: opacity 0.3s ease;
       pointer-events: none;
+      width: 100%;
     }
-
-    /* アクティブ時（タッチ中・音声案内中）に表示状態にするクラス */
     body.active #uiContainer {
       opacity: 1;
       visibility: visible;
     }
-
     h1 {
-      font-size: 2.5rem;
-      margin: 0 0 15px 0;
+      font-size: 2rem;
+      margin: 0 0 10px 0;
       color: #007aff;
     }
     #status {
-      font-size: 1.25rem;
+      font-size: 1.1rem;
       color: #34c759;
-      max-width: 85vw;
-      line-height: 1.6;
-      background: rgba(255, 255, 255, 0.05);
-      padding: 20px;
-      border-radius: 16px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      max-width: 90vw;
+      line-height: 1.5;
+      background: rgba(255, 255, 255, 0.08);
+      padding: 15px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      word-break: break-all;
     }
-
-    /* 画面が暗いときのうっすらとしたガイド（消すことも可能） */
     #hint {
       position: absolute;
       bottom: 30px;
       font-size: 0.85rem;
-      color: #333333; /* ほぼ見えない薄いグレー */
+      color: #444444;
       pointer-events: none;
     }
   </style>
@@ -79,39 +72,34 @@
   <div id="screen" onclick="handleTap()">
     <div id="uiContainer">
       <h1>ここはどこ？</h1>
-      <div id="status">現在地を確認しています...</div>
+      <div id="status">待機中...</div>
     </div>
     <div id="hint">画面のどこでもタップ</div>
   </div>
 
   <script>
-    // ※ Google Maps API Key をお持ちの場合はここに設定してください
     const GOOGLE_MAPS_API_KEY = "YOUR_GOOGLE_MAPS_API_KEY";
-
     let isBusy = false;
 
-    // タップされたときのメイン処理
     function handleTap() {
-      if (isBusy) return; // 処理中は連続入力をガード
+      if (isBusy) return;
       isBusy = true;
 
-      // 1. 画面をアクティブ（UIを表示）にする
       document.getElementById('bodyTag').classList.add('active');
-      document.getElementById('status').innerText = "現在地を取得中...";
-
-      // 2. タップ直後にイヤホンへ即時ビープ音を返す（操作確認）
+      setStatus("GPS信号を検索中...");
       playBeep();
 
-      // 3. 位置情報の取得開始
       if (!navigator.geolocation) {
-        finishSession("位置情報がサポートされていません");
+        finishSession("エラー: Geolocation API非対応ブラウザ");
         return;
       }
 
+      // 成功・失敗の詳細を捉えるため、タイムアウトを15秒に拡大、高精度を有効化
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
+          setStatus(`GPS取得成功\n緯度:${lat.toFixed(4)}, 経度:${lng.toFixed(4)}\n住所を変換中...`);
 
           if (GOOGLE_MAPS_API_KEY && GOOGLE_MAPS_API_KEY !== "YOUR_GOOGLE_MAPS_API_KEY") {
             await fetchGoogleAddress(lat, lng);
@@ -120,17 +108,32 @@
           }
         },
         (error) => {
-          finishSession("位置情報の取得に失敗しました");
+          let errMessage = "不明なエラー";
+          switch(error.code) {
+            case error.PERMISSION_DENIED:
+              errMessage = "位置情報の利用が拒否されました（設定を確認してください）";
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errMessage = "位置情報が取得できません（GPS電波不良）";
+              break;
+            case error.TIMEOUT:
+              errMessage = "位置情報の取得がタイムアウトしました";
+              break;
+          }
+          finishSession(`取得失敗 [code ${error.code}]:\n${errMessage}`);
         },
         {
           enableHighAccuracy: true,
-          timeout: 10000,
+          timeout: 15000,
           maximumAge: 0
         }
       );
     }
 
-    // イヤホンへの確認用ビープ音
+    function setStatus(text) {
+      document.getElementById('status').innerText = text;
+    }
+
     function playBeep() {
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -147,7 +150,6 @@
       } catch(e) {}
     }
 
-    // Google Maps Geocoding API
     async function fetchGoogleAddress(lat, lng) {
       const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}&language=ja`;
       try {
@@ -156,58 +158,44 @@
         if (data.status === "OK" && data.results.length > 0) {
           const rawAddress = data.results[0].formatted_address;
           const cleanAddress = rawAddress.replace(/^日本、?/, '').replace(/〒\d{3}-\d{4}\s?/, '');
-          const speechText = `ここは、${cleanAddress} 付近です。`;
-          document.getElementById('status').innerText = cleanAddress;
-          speakAndFadeOut(speechText);
+          setStatus(cleanAddress);
+          speakAndFadeOut(`ここは、${cleanAddress} 付近です。`);
         } else {
-          finishSession("住所が見つかりませんでした");
+          finishSession(`住所変換エラー: ${data.status}`);
         }
       } catch (e) {
-        finishSession("通信エラーが発生しました");
+        finishSession("通信エラー: Google APIに接続できません");
       }
     }
 
-    // APIキーなしのフォールバック (OpenStreetMap)
     async function fetchFallbackAddress(lat, lng) {
       const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=ja`;
       try {
         const res = await fetch(url);
         const data = await res.json();
         const address = data.display_name || "住所不明";
-        const speechText = `ここは、${address} 付近です。`;
-        document.getElementById('status').innerText = address;
-        speakAndFadeOut(speechText);
+        setStatus(address);
+        speakAndFadeOut(`ここは、${address} 付近です。`);
       } catch (e) {
-        finishSession("住所取得エラーです");
+        finishSession("通信エラー: OSMに接続できません");
       }
     }
 
-    // 音声読み上げを行い、読み終わったら自動で画面を真っ暗に戻す
     function speakAndFadeOut(text) {
       window.speechSynthesis.cancel();
       const uttr = new SpeechSynthesisUtterance(text);
       uttr.lang = 'ja-JP';
       uttr.rate = 1.05;
-
-      // 読み上げが終了したタイミングで画面を真っ黒に戻す
-      uttr.onend = () => {
-        resetScreen();
-      };
-      // 万が一エラー等で止まった場合の保険（5秒後に自動消灯）
-      uttr.onerror = () => {
-        resetScreen();
-      };
-
+      uttr.onend = () => resetScreen();
+      uttr.onerror = () => resetScreen();
       window.speechSynthesis.speak(uttr);
     }
 
-    // 即座に終了して画面を真っ黒に戻す関数
     function finishSession(msg) {
-      document.getElementById('status').innerText = msg;
+      setStatus(msg);
       speakAndFadeOut(msg);
     }
 
-    // 画面を真っ黒（省電力）の状態に戻す
     function resetScreen() {
       document.getElementById('bodyTag').classList.remove('active');
       isBusy = false;
